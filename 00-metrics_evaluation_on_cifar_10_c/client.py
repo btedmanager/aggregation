@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 import time
 import csv
+import numpy as np
 from model import SimpleCNN
 from dataset import load_dataset
 from utils import (
@@ -11,7 +12,9 @@ from utils import (
     LEARNING_RATE,
     DEVICE,
     CLIENT_EVAL_METRICS_FILE,
-    CLEAN_CLIENTS
+    CLEAN_CLIENTS,
+    SEED,
+    set_seed
 )
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score,
@@ -36,6 +39,7 @@ def parameters_to_state_dict(model, parameters):
 class FLClient(fl.client.NumPyClient):
     def __init__(self, cid: int):
         self.cid = cid
+        set_seed(SEED) # Ensure client-side reproducibility
         self.dataset_type = "CIFAR-10" if cid < CLEAN_CLIENTS else "CIFAR-10-C"
         self.model = SimpleCNN().to(DEVICE)
         self.trainloader = load_dataset(cid)
@@ -62,11 +66,13 @@ class FLClient(fl.client.NumPyClient):
                 loss.backward()
                 self.optimizer.step()
                 epoch_loss += loss.item() * x.size(0)
+                del x, y, outputs, loss
             epoch_cumulative_loss = epoch_loss / len(self.trainloader.dataset)
             total_cumulative_loss += epoch_cumulative_loss
 
         # Mean cumulative loss over epochs
-        mean_cum_loss = total_cumulative_loss / LOCAL_EPOCHS
+        # Normalize by both epochs and number of batches to get mean loss per batch
+        mean_cum_loss = total_cumulative_loss / (LOCAL_EPOCHS * len(self.trainloader))
 
         # Return updated parameters + metrics
         return self.get_parameters(), len(self.trainloader.dataset), {"mean_cumulative_loss": float(mean_cum_loss)}
@@ -94,6 +100,8 @@ class FLClient(fl.client.NumPyClient):
                 y_true.extend(y.cpu().numpy())
                 y_pred.extend(preds.cpu().numpy())
                 y_prob.extend(probs.cpu().numpy())
+                
+                del x, y, outputs, loss, probs, preds
 
         # Metrics
         acc = accuracy_score(y_true, y_pred)
@@ -104,13 +112,15 @@ class FLClient(fl.client.NumPyClient):
             auc = roc_auc_score(y_true, y_prob, multi_class="ovr")
         except ValueError:
             auc = 0.0
-        # cm = confusion_matrix(y_true, y_pred, labels=list(range(10)))
-        # tp = cm.trace()
-        # fp = cm.sum() - tp
-        # fn = cm.sum() - tp
-        # tn = cm.sum() - (tp + fp + fn)
+            
         cm = confusion_matrix(y_true, y_pred, labels=list(range(10)))
-        tn, fp, fn, tp = cm.ravel().tolist()
+        
+        # Calculate overall TP, FP, FN, TN for multi-class
+        tp = int(cm.diagonal().sum())
+        fp = int((cm.sum(axis=0) - cm.diagonal()).sum())
+        fn = int((cm.sum(axis=1) - cm.diagonal()).sum())
+        tn = int((cm.sum() * 10) - (tp + fp + fn))
+
         avg_loss = total_loss / len(self.valloader.dataset)
 
         # Log metrics
@@ -146,8 +156,3 @@ class FLClient(fl.client.NumPyClient):
     def set_parameters(self, parameters):
         state_dict = parameters_to_state_dict(self.model, parameters)
         self.model.load_state_dict(state_dict, strict=True)
-    
-    # def set_parameters(self, parameters):
-    #     params_dict = zip(self.model.state_dict().keys(), parameters)
-    #     state_dict = {k: torch.tensor(v) for k, v in params_dict}
-    #     self.model.load_state_dict(state_dict, strict=True)

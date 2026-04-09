@@ -1,8 +1,9 @@
-import shutil, os
+import shutil, os, warnings
 import flwr as fl
+from flwr.common import Context
 from client import FLClient
 from strategy import ScoreWeightedFedAvg
-from utils import NUM_CLIENTS, NUM_CLIENTS_AT_ONCE, NUM_ROUNDS, CLEAN_CLIENTS
+from utils import NUM_CLIENTS, NUM_CLIENTS_AT_ONCE, NUM_ROUNDS, CLEAN_CLIENTS, SEED, set_seed
 from utils import save_experiment_config, create_global_metrics_file, create_eval_metrics_file
 from utils import LOG_DIR, CLIENTS_METADATA_FILE
 import numpy as np
@@ -11,28 +12,26 @@ from client_metadata import save_clients_metadata_csv, extract_client_metadata_f
 import torch
 import random
 
-seed = 42
-random.seed(seed)
-np.random.seed(seed)
-torch.manual_seed(seed)
-torch.cuda.manual_seed(seed)
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
+set_seed(SEED)
 
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
 
 shutil.rmtree(LOG_DIR) if os.path.exists(LOG_DIR) else print("FOLDER DOESN'T EXIST")
-save_experiment_config()
-create_global_metrics_file()
-create_eval_metrics_file()
+function_to_run_configs = [save_experiment_config, create_global_metrics_file, create_eval_metrics_file]
+for func in function_to_run_configs:
+    func()
 
 
 # ----------------------
 # Client factory
 # ----------------------
-def client_fn(cid: str):
+def client_fn(context: Context):
     """
     Create a FLClient with the given client id.
     """
+    cid = context.node_config["partition-id"]
     return FLClient(int(cid)).to_client()
 
 
@@ -91,6 +90,6 @@ fl.simulation.start_simulation(
     client_fn=client_fn,
     num_clients=NUM_CLIENTS,
     config=fl.server.ServerConfig(num_rounds=NUM_ROUNDS),
-    client_resources = {"num_cpus": 1, "num_gpus": 0},
+    client_resources = {"num_cpus": 5, "num_gpus": 0},
     strategy=strategy
 )

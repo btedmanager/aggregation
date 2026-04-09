@@ -56,35 +56,41 @@ class CIFAR10C(Dataset):
 
         return img, label
 
-GLOBAL_DATASET = None
+GLOBAL_DATASET_CLEAN = None
+GLOBAL_DATASET_CORRUPTED = None
 
-def get_dataset():
-    global GLOBAL_DATASET
-    if GLOBAL_DATASET is None:
+def get_clean_dataset():
+    global GLOBAL_DATASET_CLEAN
+    if GLOBAL_DATASET_CLEAN is None:
         transform = transforms.Compose([transforms.ToTensor()])
-        GLOBAL_DATASET = torchvision.datasets.CIFAR10(
+        GLOBAL_DATASET_CLEAN = torchvision.datasets.CIFAR10(
             root=CIFAR10_ROOT,
             train=True,
             download=True,
             transform=transform,
         )
-    return GLOBAL_DATASET
+    return GLOBAL_DATASET_CLEAN
 
-def load_dataset(client_id):
-    transform = transforms.Compose([transforms.ToTensor()])
-
-    if client_id < CLEAN_CLIENTS:
-        dataset = get_dataset()
-        indices = np.array_split(np.arange(len(dataset)), CLEAN_CLIENTS)
-        subset = Subset(dataset, indices[client_id])
-
-    else:
-        dataset = CIFAR10C(
+def get_corrupted_dataset():
+    global GLOBAL_DATASET_CORRUPTED
+    if GLOBAL_DATASET_CORRUPTED is None:
+        transform = transforms.Compose([transforms.ToTensor()])
+        GLOBAL_DATASET_CORRUPTED = CIFAR10C(
             root=CIFAR10C_ROOT,
             corruption=CIFAR10C_CORRUPTION,
             severity=CIFAR10C_SEVERITY,
             transform=transform
         )
+    return GLOBAL_DATASET_CORRUPTED
+
+def load_dataset(client_id):
+    if client_id < CLEAN_CLIENTS:
+        dataset = get_clean_dataset()
+        indices = np.array_split(np.arange(len(dataset)), CLEAN_CLIENTS)
+        subset = Subset(dataset, indices[client_id])
+
+    else:
+        dataset = get_corrupted_dataset()
         indices = np.array_split(np.arange(len(dataset)), CLEAN_CLIENTS)
         subset = Subset(dataset, indices[client_id - CLEAN_CLIENTS])
 
